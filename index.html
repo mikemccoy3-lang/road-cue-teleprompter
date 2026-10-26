@@ -1,0 +1,285 @@
+<title>Road Cue Teleprompter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@500;600;700&display=swap">
+<style>
+/* Layout: camera viewfinder fills the screen; script band sits at the top, near the lens; transport bar at the bottom. Single dark look by choice. */
+:root{
+  --ink:#0b0d0f; --panel:#15191d; --line:#2a3036; --fg:#eef1f3; --muted:#9aa4ad;
+  --tally:#ff3b30; --cue:#ffc94a;
+  --script:"Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --ui:"Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%;background:var(--ink);color:var(--fg);overflow:hidden}
+[hidden]{display:none!important}
+body{font-family:var(--ui);-webkit-tap-highlight-color:transparent}
+#stage{position:fixed;inset:0;background:var(--ink)}
+video#cam{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+video#cam.selfie{transform:scaleX(-1)}
+#nocam{position:absolute;inset:0;display:grid;place-items:end center;padding:0 16px 140px;text-align:center;color:var(--muted);font-size:1rem;line-height:1.4}
+#nocam p{max-width:30ch;margin:0}
+
+/* Script band */
+#band{position:absolute;left:0;right:0;top:0;padding-top:env(safe-area-inset-top,0px);height:var(--bandH,38%);overflow:hidden;
+  background:rgba(11,13,15,var(--dim,.55));
+  -webkit-mask-image:linear-gradient(#000 0,#000 78%,transparent 100%);mask-image:linear-gradient(#000 0,#000 78%,transparent 100%)}
+#roll{position:absolute;left:0;right:0;top:0;padding:0 20px;will-change:transform}
+#roll.mirror{transform-origin:center}
+#text{font-family:var(--script);font-weight:700;font-size:var(--fs,30px);line-height:1.35;white-space:pre-wrap;margin:0;text-shadow:0 2px 6px rgba(0,0,0,.6);overflow-wrap:anywhere}
+#cueLine{position:absolute;left:0;right:0;top:var(--cueY,22%);height:0;border-top:2px dashed var(--cue);opacity:.7;pointer-events:none}
+#cueLine::before{content:"";position:absolute;left:6px;top:-8px;border:7px solid transparent;border-left:10px solid var(--cue)}
+
+/* Status chips */
+#chips{position:absolute;right:12px;top:calc(var(--bandH,38%) + 10px);display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.chip{font:600 .85rem/1 var(--ui);letter-spacing:.06em;text-transform:uppercase;padding:6px 9px;border-radius:4px;background:rgba(21,25,29,.8);color:var(--muted);font-variant-numeric:tabular-nums}
+#tally{display:none;color:#fff;background:var(--tally)}
+body.rec #tally{display:inline-block}
+body.rec #tally::before{content:"● "}
+
+#count{position:absolute;inset:0;display:none;place-items:center;font:700 9rem/1 var(--ui);color:#fff;text-shadow:0 4px 30px rgba(0,0,0,.7);pointer-events:none}
+
+/* Transport */
+#bar{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(14px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;justify-content:space-between;gap:10px;background:linear-gradient(transparent,rgba(11,13,15,.85) 40%)}
+.grp{display:flex;align-items:center;gap:8px}
+button{font:600 1rem/1 var(--ui);letter-spacing:.04em;text-transform:uppercase;color:var(--fg);background:rgba(21,25,29,.85);border:1px solid var(--line);border-radius:999px;min-width:46px;height:46px;padding:0 14px;cursor:pointer}
+button:focus-visible{outline:2px solid var(--cue);outline-offset:2px}
+button:active{transform:scale(.96)}
+#recBtn{width:72px;height:72px;min-width:72px;padding:0;border-radius:50%;border:4px solid #fff;background:transparent;display:grid;place-items:center}
+#recBtn i{display:block;width:54px;height:54px;border-radius:50%;background:var(--tally);transition:all .2s}
+body.rec #recBtn i{width:28px;height:28px;border-radius:6px}
+#speedVal{min-width:2.2ch;text-align:center;font-size:1.3rem;font-variant-numeric:tabular-nums}
+
+/* Sheets */
+.sheet{position:absolute;left:0;right:0;bottom:0;max-height:88%;overflow:auto;background:var(--panel);border-top:1px solid var(--line);border-radius:14px 14px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:14px}
+.sheet h2{margin:0;font:700 1.5rem/1.1 var(--ui);letter-spacing:.03em;text-transform:uppercase}
+.sheet .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+label{font:600 .95rem/1.2 var(--ui);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+textarea{width:100%;box-sizing:border-box;min-height:34vh;resize:vertical;background:var(--ink);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:12px;font:400 1.05rem/1.5 var(--script)}
+input[type=range]{flex:1;accent-color:var(--cue);min-width:0}
+.ctl{display:flex;align-items:center;gap:12px}
+.ctl output{min-width:5ch;text-align:right;font:600 1rem var(--ui);font-variant-numeric:tabular-nums}
+.toggles{display:flex;flex-wrap:wrap;gap:8px}
+.toggles button[aria-pressed=true]{background:var(--cue);color:var(--ink);border-color:var(--cue)}
+.meta{color:var(--muted);font:500 1rem var(--ui);letter-spacing:.03em}
+.primary{background:var(--cue);color:var(--ink);border-color:var(--cue)}
+#preview{width:100%;max-height:50vh;background:#000;border-radius:8px}
+.hint{color:var(--muted);font:400 .95rem/1.4 var(--script);margin:0}
+@media (prefers-reduced-motion:reduce){#recBtn i{transition:none}}
+</style>
+
+<div id="stage">
+  <div id="nocam" hidden><p>Camera isn't available in this view. The prompter still scrolls. Open the standalone file in Safari or Chrome to film.</p></div>
+  <video id="cam" playsinline muted autoplay></video>
+
+  <div id="band"><div id="roll"><p id="text"></p></div><div id="cueLine"></div></div>
+
+  <div id="chips">
+    <span class="chip" id="tally">REC 00:00</span>
+    <span class="chip" id="eta">—</span>
+  </div>
+  <div id="count"></div>
+
+  <div id="bar">
+    <div class="grp">
+      <button id="editBtn" aria-label="Edit script and settings">Script</button>
+      <button id="flipBtn" aria-label="Switch camera">Flip</button>
+    </div>
+    <button id="recBtn" aria-label="Start recording"><i></i></button>
+    <div class="grp">
+      <button id="slower" aria-label="Slower">−</button>
+      <span id="speedVal">4</span>
+      <button id="faster" aria-label="Faster">+</button>
+      <button id="playBtn" aria-label="Play or pause scrolling">Play</button>
+    </div>
+  </div>
+
+  <section class="sheet" id="settings" hidden>
+    <div class="row"><h2>Script</h2><button class="primary" id="doneBtn">Done</button></div>
+    <textarea id="scriptIn" aria-label="Script text"></textarea>
+    <div class="meta" id="wordInfo"></div>
+    <div class="ctl"><label for="fsIn">Text size</label><input id="fsIn" type="range" min="18" max="64" value="30"><output id="fsOut">30px</output></div>
+    <div class="ctl"><label for="bandIn">Prompter height</label><input id="bandIn" type="range" min="20" max="70" value="38"><output id="bandOut">38%</output></div>
+    <div class="ctl"><label for="dimIn">Backdrop</label><input id="dimIn" type="range" min="0" max="90" value="55"><output id="dimOut">55%</output></div>
+    <div class="toggles">
+      <button id="mirrorBtn" aria-pressed="false">Mirror text</button>
+      <button id="cdBtn" aria-pressed="true">3-sec countdown</button>
+      <button id="autoBtn" aria-pressed="true">Scroll on record</button>
+      <button id="topBtn">Back to top</button>
+    </div>
+    <p class="hint">Tap the script to pause. Drag it up or down to jump. Keep your eyes on the dashed cue line, close to the lens.</p>
+  </section>
+
+  <section class="sheet" id="review" hidden>
+    <div class="row"><h2>Take</h2><span class="meta" id="takeInfo"></span></div>
+    <video id="preview" controls playsinline></video>
+    <div class="toggles">
+      <button class="primary" id="saveBtn">Save video</button>
+      <button id="shareBtn" hidden>Share</button>
+      <button id="discardBtn">Discard</button>
+    </div>
+    <p class="hint" id="saveHint"></p>
+  </section>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const root=document.documentElement, roll=$('roll'), band=$('band'), cam=$('cam');
+const store={get(k,d){try{const v=localStorage.getItem('rct_'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+             set(k,v){try{localStorage.setItem('rct_'+k,JSON.stringify(v))}catch(e){}}};
+
+const SAMPLE=`Hey, Mike here.
+
+Today I'm testing my own teleprompter, built from scratch, running right in the phone browser.
+
+The words scroll right up here by the lens, so it looks like I'm talking straight to you instead of reading.
+
+Speed goes up and down with the plus and minus buttons. Tap the text to pause. Drag it to jump around.
+
+When you hit record, there's a three-second countdown, then the script starts rolling on its own.
+
+That's it. Let's go make something.`;
+
+const S={script:store.get('script',SAMPLE),fs:store.get('fs',30),bandH:store.get('bandH',38),dim:store.get('dim',55),
+  speed:store.get('speed',4),mirror:store.get('mirror',false),countdown:store.get('cd',true),autoScroll:store.get('auto',true),facing:store.get('facing','user')};
+
+let y=0, playing=false, last=0, stream=null, rec=null, chunks=[], recStart=0, tallyTimer=null, takeBlob=null, takeExt='mp4', wakeLock=null;
+
+function wordCount(t){return (t.trim().match(/\S+/g)||[]).length}
+function render(){
+  $('text').textContent=S.script||' ';
+  root.style.setProperty('--fs',S.fs+'px');
+  root.style.setProperty('--bandH',S.bandH+'%');
+  root.style.setProperty('--dim',S.dim/100);
+  $('speedVal').textContent=S.speed;
+  roll.classList.toggle('mirror',S.mirror);
+  $('mirrorBtn').setAttribute('aria-pressed',S.mirror);
+  $('cdBtn').setAttribute('aria-pressed',S.countdown);
+  $('autoBtn').setAttribute('aria-pressed',S.autoScroll);
+  const w=wordCount(S.script), mins=w/150;
+  $('wordInfo').textContent=`${w} words · about ${mins<1?Math.max(1,Math.round(mins*60))+' sec':mins.toFixed(1)+' min'} at a natural 150 wpm`;
+  updateEta(); place();
+}
+function pxPerSec(){return S.speed*S.speed*1.6+8} // speed 1..10 → ~10..168 px/s
+function cueOffset(){return band.clientHeight*0.22}
+function maxY(){return Math.max(0,$('text').offsetHeight)}
+function place(){roll.style.transform=`translateY(${cueOffset()-y}px)`+(S.mirror?' scaleX(-1)':'')}
+function updateEta(){
+  const remaining=Math.max(0,maxY()-y), s=Math.round(remaining/pxPerSec());
+  $('eta').textContent=`${S.speed} · ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} left`;
+}
+function tick(t){
+  if(!playing)return;
+  const dt=last?(t-last)/1000:0; last=t;
+  y=Math.min(maxY(),y+pxPerSec()*dt); place();
+  if(Math.floor(t/250)!==Math.floor((t-dt*1000)/250))updateEta();
+  if(y>=maxY()){setPlay(false);return}
+  requestAnimationFrame(tick);
+}
+function setPlay(on){
+  playing=on; last=0; $('playBtn').textContent=on?'Pause':'Play';
+  if(on)requestAnimationFrame(tick); updateEta();
+}
+
+/* Camera */
+async function startCam(){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:true,video:{facingMode:S.facing,width:{ideal:1920},height:{ideal:1080}}});
+    cam.srcObject=stream; cam.classList.toggle('selfie',S.facing==='user');
+    $('nocam').hidden=true; $('recBtn').disabled=false; $('flipBtn').disabled=false;
+    $('recBtn').style.opacity='';
+  }catch(e){
+    stream=null; $('nocam').hidden=false; $('recBtn').disabled=true; $('flipBtn').disabled=true;
+    $('recBtn').style.opacity=.35;
+  }
+}
+async function keepAwake(){try{wakeLock=await navigator.wakeLock?.request('screen')}catch(e){}}
+
+/* Recording */
+function pickType(){
+  const list=['video/mp4;codecs=avc1,mp4a','video/mp4','video/webm;codecs=vp9,opus','video/webm'];
+  for(const t of list){if(window.MediaRecorder&&MediaRecorder.isTypeSupported(t))return t}
+  return '';
+}
+async function countdown(){
+  if(!S.countdown)return;
+  const c=$('count'); c.style.display='grid';
+  for(let n=3;n>0;n--){c.textContent=n;await new Promise(r=>setTimeout(r,1000))}
+  c.style.display='none';
+}
+async function startRec(){
+  if(!stream||!window.MediaRecorder)return;
+  await countdown();
+  const type=pickType(); takeExt=type.includes('mp4')?'mp4':'webm';
+  chunks=[]; rec=new MediaRecorder(stream,type?{mimeType:type,videoBitsPerSecond:8e6}:undefined);
+  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  rec.onstop=showTake;
+  rec.start(1000); recStart=Date.now();
+  document.body.classList.add('rec'); $('recBtn').setAttribute('aria-label','Stop recording');
+  tallyTimer=setInterval(()=>{const s=Math.floor((Date.now()-recStart)/1000);$('tally').textContent=`REC ${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`},500);
+  if(S.autoScroll)setPlay(true);
+}
+function stopRec(){
+  if(rec&&rec.state!=='inactive')rec.stop();
+  clearInterval(tallyTimer); document.body.classList.remove('rec');
+  $('recBtn').setAttribute('aria-label','Start recording'); $('tally').textContent='REC 00:00';
+  setPlay(false);
+}
+function showTake(){
+  takeBlob=new Blob(chunks,{type:chunks[0]?.type||'video/'+takeExt});
+  const url=URL.createObjectURL(takeBlob); $('preview').src=url;
+  const s=Math.round((Date.now()-recStart)/1000);
+  $('takeInfo').textContent=`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')} · ${(takeBlob.size/1048576).toFixed(1)} MB`;
+  const file=new File([takeBlob],fname(),{type:takeBlob.type});
+  $('shareBtn').hidden=!(navigator.canShare&&navigator.canShare({files:[file]}));
+  $('saveHint').textContent='';
+  $('review').hidden=false;
+}
+function fname(){const d=new Date();return `take-${d.toISOString().slice(0,16).replace(/[:T]/g,'-')}.${takeExt}`}
+
+/* Wire up */
+$('recBtn').onclick=()=>{document.body.classList.contains('rec')?stopRec():startRec()};
+$('playBtn').onclick=()=>setPlay(!playing);
+$('slower').onclick=()=>{S.speed=Math.max(1,S.speed-1);store.set('speed',S.speed);render()};
+$('faster').onclick=()=>{S.speed=Math.min(10,S.speed+1);store.set('speed',S.speed);render()};
+$('flipBtn').onclick=()=>{S.facing=S.facing==='user'?'environment':'user';store.set('facing',S.facing);startCam()};
+let scriptAtOpen='';
+$('editBtn').onclick=()=>{setPlay(false);scriptAtOpen=S.script;$('scriptIn').value=S.script;$('settings').hidden=false};
+$('doneBtn').onclick=()=>{$('settings').hidden=true;y=S.script!==scriptAtOpen?0:Math.min(y,maxY());render()};
+$('scriptIn').oninput=e=>{S.script=e.target.value;store.set('script',S.script);render()};
+const bindRange=(id,key,sk,suf)=>{const el=$(id);el.value=S[key];$(id.replace('In','Out')).textContent=S[key]+suf;
+  el.oninput=()=>{S[key]=+el.value;$(id.replace('In','Out')).textContent=el.value+suf;store.set(sk,S[key]);render()}};
+bindRange('fsIn','fs','fs','px');bindRange('bandIn','bandH','bandH','%');bindRange('dimIn','dim','dim','%');
+const tog=(id,key,sk)=>$(id).onclick=()=>{S[key]=!S[key];store.set(sk,S[key]);render()};
+tog('mirrorBtn','mirror','mirror');tog('cdBtn','countdown','cd');tog('autoBtn','autoScroll','auto');
+$('topBtn').onclick=()=>{y=0;place();updateEta()};
+
+$('saveBtn').onclick=()=>{
+  if(!takeBlob)return;
+  const a=document.createElement('a');a.href=$('preview').src;a.download=fname();document.body.appendChild(a);a.click();a.remove();
+  $('saveHint').textContent='If nothing downloaded, use Share and pick Save Video, or long-press the player.';
+};
+$('shareBtn').onclick=async()=>{try{await navigator.share({files:[new File([takeBlob],fname(),{type:takeBlob.type})],title:'Teleprompter take'})}catch(e){}};
+$('discardBtn').onclick=()=>{$('review').hidden=true;$('preview').removeAttribute('src');takeBlob=null;y=0;place();updateEta()};
+
+/* Tap to pause, drag to scrub */
+let dragStartY=null, dragY0=0, moved=false;
+band.addEventListener('pointerdown',e=>{dragStartY=e.clientY;dragY0=y;moved=false;band.setPointerCapture(e.pointerId)});
+band.addEventListener('pointermove',e=>{if(dragStartY==null)return;const d=dragStartY-e.clientY;if(Math.abs(d)>6)moved=true;
+  if(moved){y=Math.min(maxY(),Math.max(0,dragY0+d));place();updateEta()}});
+band.addEventListener('pointerup',()=>{if(!moved)setPlay(!playing);dragStartY=null});
+band.style.touchAction='none';
+
+document.addEventListener('keydown',e=>{
+  if(!$('settings').hidden||e.target.tagName==='TEXTAREA')return;
+  if(e.code==='Space'){e.preventDefault();document.activeElement?.blur();setPlay(!playing)}
+  if(e.key==='ArrowUp')$('faster').click(); if(e.key==='ArrowDown')$('slower').click();
+});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')keepAwake()});
+window.addEventListener('resize',()=>{place();updateEta()});
+
+render(); startCam(); keepAwake();
+if(document.fonts)document.fonts.ready.then(()=>{place();updateEta()});
+})();
+</script>
