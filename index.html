@@ -209,7 +209,7 @@ async function startCam(){
   if(stream)stream.getTracks().forEach(t=>t.stop());
   try{
     stream=await navigator.mediaDevices.getUserMedia({audio:true,video:{facingMode:S.facing,width:{ideal:1920},height:{ideal:1080}}});
-    cam.srcObject=stream; cam.classList.toggle('selfie',S.facing==='user');
+    cam.srcObject=stream; cam.classList.toggle('selfie',S.facing==='user'); cam.play().catch(()=>{});
     $('nocam').hidden=true; $('recBtn').disabled=false; $('flipBtn').disabled=false;
     $('recBtn').style.opacity='';
   }catch(e){
@@ -217,6 +217,9 @@ async function startCam(){
     $('recBtn').style.opacity=.35;
   }
 }
+// iOS stops the camera when the take is played back or the Share sheet backgrounds the app; restart it if so
+function camLive(){const t=stream?stream.getTracks():[];return t.length>0&&t.every(k=>k.readyState==='live'&&!k.muted)&&!cam.paused}
+async function ensureCam(){if(!camLive())await startCam()}
 async function keepAwake(){try{wakeLock=await navigator.wakeLock?.request('screen')}catch(e){}}
 
 /* Recording */
@@ -232,13 +235,20 @@ async function countdown(){
   c.style.display='none';
 }
 async function startRec(){
+  await ensureCam();
   if(!stream||!window.MediaRecorder)return;
   await countdown();
   const type=pickType(); takeExt=type.includes('mp4')?'mp4':'webm';
-  chunks=[]; rec=new MediaRecorder(stream,type?{mimeType:type,videoBitsPerSecond:8e6}:undefined);
-  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
-  rec.onstop=showTake;
-  rec.start(1000); recStart=Date.now();
+  try{
+    chunks=[]; rec=new MediaRecorder(stream,type?{mimeType:type,videoBitsPerSecond:8e6}:undefined);
+    rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+    rec.onstop=showTake;
+    rec.start(1000); recStart=Date.now();
+  }catch(e){
+    rec=null; await startCam();
+    alert("Recording couldn't start, so the camera was restarted. Tap Record to try again.");
+    return;
+  }
   document.body.classList.add('rec'); $('recBtn').setAttribute('aria-label','Stop recording');
   tallyTimer=setInterval(()=>{const s=Math.floor((Date.now()-recStart)/1000);$('tally').textContent=`REC ${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`},500);
   if(S.autoScroll)setPlay(true);
@@ -284,7 +294,10 @@ $('saveBtn').onclick=()=>{
   $('saveHint').textContent='If nothing downloaded, use Share and pick Save Video, or long-press the player.';
 };
 $('shareBtn').onclick=async()=>{try{await navigator.share({files:[new File([takeBlob],fname(),{type:takeBlob.type})],title:'Teleprompter take'})}catch(e){}};
-$('discardBtn').onclick=()=>{$('review').hidden=true;$('preview').removeAttribute('src');takeBlob=null;y=0;place();updateEta()};
+$('discardBtn').onclick=()=>{
+  const p=$('preview'); p.pause(); if(p.src)URL.revokeObjectURL(p.src); p.removeAttribute('src'); p.load();
+  $('review').hidden=true; takeBlob=null; y=0; place(); updateEta(); ensureCam();
+};
 
 /* Tap to pause, drag to scrub */
 let dragStartY=null, dragY0=0, moved=false;
@@ -299,7 +312,7 @@ document.addEventListener('keydown',e=>{
   if(e.code==='Space'){e.preventDefault();document.activeElement?.blur();setPlay(!playing)}
   if(e.key==='ArrowUp')$('faster').click(); if(e.key==='ArrowDown')$('slower').click();
 });
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')keepAwake()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){keepAwake();if($('review').hidden)ensureCam()}});
 window.addEventListener('resize',()=>{place();updateEta()});
 
 render(); startCam(); keepAwake();
